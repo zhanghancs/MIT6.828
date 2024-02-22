@@ -1,5 +1,6 @@
 /* See COPYRIGHT for copyright information. */
 
+#include "inc/env.h"
 #include "inc/memlayout.h"
 #include "inc/stdio.h"
 #include "inc/types.h"
@@ -119,7 +120,7 @@ boot_alloc(uint32_t n) {
 // Above ULIM the user cannot read or write.
 void mem_init(void) {
     uint32_t cr0;
-    size_t   n, i;
+    size_t   m, n, i;
 
     // Find out how much memory the machine has (npages & npages_basemem).
     i386_detect_memory();
@@ -139,6 +140,7 @@ void mem_init(void) {
     // following line.)
 
     // Permissions: kernel R, user R
+
     kern_pgdir[PDX(UVPT)] = PADDR(kern_pgdir) | PTE_U | PTE_P;
 
     //////////////////////////////////////////////////////////////////////
@@ -156,6 +158,9 @@ void mem_init(void) {
     //////////////////////////////////////////////////////////////////////
     // Make 'envs' point to an array of size 'NENV' of 'struct Env'.
     // LAB 3: Your code here.
+
+    m = ROUNDUP(NENV * sizeof(struct Env), PGSIZE);
+    envs = boot_alloc(m);
 
     //////////////////////////////////////////////////////////////////////
     // Now that we've allocated the initial kernel data structures, we set
@@ -181,13 +186,6 @@ void mem_init(void) {
     // Your code goes here:
 
     boot_map_region(kern_pgdir, UPAGES, n, ROUNDDOWN(PADDR(pages), PGSIZE), PTE_U);
-    //////////////////////////////////////////////////////////////////////
-    // Map 'pages' read-only by the user at linear address UPAGES
-    // Permissions:
-    //    - the new image at UPAGES -- kernel R, user R
-    //      (ie. perm = PTE_U | PTE_P)
-    //    - pages itself -- kernel RW, user NONE
-    // Your code goes here:
 
     //////////////////////////////////////////////////////////////////////
     // Map the 'envs' array read-only by the user at linear address UENVS
@@ -196,6 +194,8 @@ void mem_init(void) {
     //    - the new image at UENVS  -- kernel R, user R
     //    - envs itself -- kernel RW, user NONE
     // LAB 3: Your code here.
+
+    boot_map_region(kern_pgdir, UENVS, m, ROUNDDOWN(PADDR(envs), PGSIZE), PTE_U);
 
     //////////////////////////////////////////////////////////////////////
     // Use the physical memory that 'bootstack' refers to as the kernel
@@ -206,7 +206,7 @@ void mem_init(void) {
     //     * [KSTACKTOP-PTSIZE, KSTACKTOP-KSTKSIZE) -- not backed; so if
     //       the kernel overflows its stack, it will fault rather than
     //       overwrite memory.  Known as a "guard page".
-    //     Permissions: kernel RW, user NONE
+    //     Permissions: kernel RW, user NONEs
     // Your code goes here:
 
     boot_map_region(kern_pgdir, KSTACKTOP - KSTKSIZE, KSTKSIZE, ROUNDDOWN(PADDR(bootstack), PGSIZE), PTE_W);
@@ -530,7 +530,25 @@ static uintptr_t user_mem_check_addr;
 //
 int user_mem_check(struct Env* env, const void* va, size_t len, int perm) {
     // LAB 3: Your code here.
-
+    uintptr_t va_s, va_e;
+    uintptr_t i;
+    pte_t*    p;
+    va_s = ROUNDDOWN((uintptr_t)va, PGSIZE);
+    va_e = ROUNDUP((uintptr_t)va + len, PGSIZE);
+    for (i = va_s; i < va_e; i += PGSIZE) {
+        if (i > ULIM) {
+            user_mem_check_addr = (i == va_s ? (uintptr_t)va : i);
+            return -E_FAULT;
+        }
+        p = pgdir_walk(env->env_pgdir, (void*)i, false);
+        if (p == NULL) {
+            user_mem_check_addr = (i == va_s ? (uintptr_t)va : i);
+            return -E_FAULT;
+        } else if (((*p) & (perm | PTE_P)) != (perm | PTE_P)) {
+            user_mem_check_addr = (i == va_s ? (uintptr_t)va : i);
+            return -E_FAULT;
+        }
+    }
     return 0;
 }
 

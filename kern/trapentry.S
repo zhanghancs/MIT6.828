@@ -65,6 +65,12 @@ TRAPHANDLER_NOEC(fperr_handler, T_FPERR)
 TRAPHANDLER(align_handler, T_ALIGN)
 TRAPHANDLER_NOEC(mchk_handler, T_MCHK)
 TRAPHANDLER_NOEC(simderr_handler, T_SIMDERR)
+TRAPHANDLER_NOEC(timer_handler, IRQ_OFFSET + IRQ_TIMER)
+TRAPHANDLER_NOEC(serial_handler, IRQ_OFFSET + IRQ_SERIAL)
+TRAPHANDLER_NOEC(kbd_handler, IRQ_OFFSET + IRQ_KBD)
+TRAPHANDLER_NOEC(spurious_handler, IRQ_OFFSET + IRQ_SPURIOUS)
+TRAPHANDLER_NOEC(ide_handler, IRQ_OFFSET + IRQ_IDE)
+TRAPHANDLER_NOEC(error_handler, IRQ_OFFSET + IRQ_ERROR)
 TRAPHANDLER_NOEC(syscall_handler, T_SYSCALL)
 /*
  * Lab 3: Your code here for _alltraps
@@ -73,6 +79,10 @@ TRAPHANDLER_NOEC(syscall_handler, T_SYSCALL)
 _alltraps:
 	pushl %ds
 	pushl %es
+	pushl $GD_KD
+	popl %ds
+	pushl $GD_KD
+	popl %es
 	pushal
 	pushl %esp
 	call trap

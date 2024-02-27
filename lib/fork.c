@@ -4,7 +4,6 @@
 #include "inc/env.h"
 #include "inc/memlayout.h"
 #include "inc/mmu.h"
-#include "inc/stdio.h"
 #include "inc/types.h"
 #include <inc/string.h>
 #include <inc/lib.h>
@@ -30,6 +29,7 @@ pgfault(struct UTrapframe* utf) {
     //   (see <inc/memlayout.h>).
 
     // LAB 4: Your code here.
+
     if ((err & FEC_WR) == 0) {
         panic("this page fault not caused by write");
     }
@@ -45,7 +45,7 @@ pgfault(struct UTrapframe* utf) {
 
     // LAB 4: Your code here.
     // panic("pgfault not implemented");
-    // cprintf("page fault: %08x\n", PGNUM(addr));
+
     addr = ROUNDDOWN(addr, PGSIZE);
     if ((r = sys_page_map(0, addr, 0, PFTEMP, PTE_P | PTE_U)) < 0) {
         panic("sys_page_map fail: %e", r);
@@ -72,13 +72,16 @@ pgfault(struct UTrapframe* utf) {
 //
 static int
 duppage(envid_t envid, unsigned pn) {
-    int r;
     // LAB 4: Your code here.
     // panic("duppage not implemented");
-    // if (PGNUM(UXSTACKTOP - PGSIZE) == pn) { // exception stack
-    //     return 0;
-    // }
-    // cprintf("begin: %08x\n", pn);
+
+    int r;
+    if (uvpt[pn] & PTE_SHARE) {
+        if ((r = sys_page_map(0, (void*)(pn * PGSIZE), envid, (void*)(pn * PGSIZE), uvpt[pn] & PTE_SYSCALL)) < 0) {
+            panic("sys_page_map fail: %e", r);
+        }
+        return 0;
+    }
     if (((uvpt[pn] & PTE_W) != 0) || ((uvpt[pn] & PTE_COW) != 0)) {
         if ((r = sys_page_map(0, (void*)(pn * PGSIZE), envid, (void*)(pn * PGSIZE), PTE_P | PTE_U | PTE_COW)) < 0) {
             panic("sys_page_map fail: %e", r);
@@ -91,7 +94,6 @@ duppage(envid_t envid, unsigned pn) {
             panic("sys_page_map fail: %e", r);
         }
     }
-    // cprintf("end: %08x\n", pn);
     return 0;
 }
 

@@ -52,8 +52,7 @@ const char* panicstr;
 void _panic(const char* file, int line, const char* fmt, ...) {
     va_list ap;
 
-    if (panicstr)
-        goto dead;
+    if (panicstr) goto dead;
     panicstr = fmt;
 
     // Be extra sure that the machine is in as reasonable state

@@ -1,5 +1,6 @@
 /* See COPYRIGHT for copyright information. */
 
+#include "inc/list.h"
 #include "inc/memlayout.h"
 #include "inc/stdio.h"
 #include "inc/types.h"
@@ -11,6 +12,7 @@
 
 #include <kern/pmap.h>
 #include <kern/kclock.h>
+#include <kern/buddy.h>
 
 // These variables are set by i386_detect_memory()
 size_t        npages;         // Amount of physical memory (in pages)
@@ -20,6 +22,8 @@ static size_t npages_basemem; // Amount of base memory (in pages)
 pde_t*                  kern_pgdir;     // Kernel's initial page directory
 struct PageInfo*        pages;          // Physical page state array
 static struct PageInfo* page_free_list; // Free list of physical pages
+
+extern struct FreeArea* free_areas;
 
 // --------------------------------------------------------------
 // Detect machine's physical memory setup.
@@ -67,6 +71,7 @@ static void       check_kern_pgdir(void);
 static physaddr_t check_va2pa(pde_t* pgdir, uintptr_t va);
 static void       check_page(void);
 static void       check_page_installed_pgdir(void);
+static void       check_malloc_and_free(void);
 
 // This simple physical memory allocator is used only while JOS is setting
 // up its virtual memory system.  page_alloc() is the real allocator.
@@ -80,8 +85,7 @@ static void       check_page_installed_pgdir(void);
 // If we're out of memory, boot_alloc should panic.
 // This function may ONLY be used during initialization,
 // before the page_free_list list has been set up.
-static void*
-boot_alloc(uint32_t n) {
+static void* boot_alloc(uint32_t n) {
     static char* nextfree; // virtual address of next byte of free memory
     char*        result;
 
@@ -118,7 +122,7 @@ boot_alloc(uint32_t n) {
 // Above ULIM the user cannot read or write.
 void mem_init(void) {
     uint32_t cr0;
-    size_t   n, i;
+    size_t   m, n;
 
     // Find out how much memory the machine has (npages & npages_basemem).
     i386_detect_memory();
@@ -158,6 +162,13 @@ void mem_init(void) {
     // memory management will go through the page_* functions. In
     // particular, we can now map memory using boot_map_region
     // or page_insert
+
+    m = ROUNDUP(MAX_ORDER * sizeof(struct FreeArea), PGSIZE);
+    free_areas = boot_alloc(m);
+    memset(free_areas, 0, n);
+    buddy_init();
+    check_malloc_and_free();
+
     page_init();
 
     check_page_free_list(1);
@@ -887,4 +898,71 @@ check_page_installed_pgdir(void) {
     page_free(pp0);
 
     cprintf("check_page_installed_pgdir() succeeded!\n");
+}
+
+static void check_malloc_and_free() {
+    int cnt, order;
+    for (int i = 0; i < npages; ++i) {
+        assert(pages[i].pp_ref == 0);
+        assert(pages[i].pp_order == 10);
+    }
+    struct PageInfo *pp1, *pp2, *pp3;
+    pp1 = malloc(1 << 10);
+    assert(pp1 != NULL);
+    assert(free_areas[10].nr_free == 31);
+    for (int i = 31 * 1024; i < 32 * 1024; i++) {
+        assert(pages[i].pp_order == 10);
+        assert(pages[i].pp_ref == 1);
+    }
+    pp2 = malloc(1 << 9);
+    assert(pp2 != NULL);
+    assert(free_areas[10].nr_free == 30);
+    assert((free_areas[9].nr_free == 1));
+    for (int i = 30 * 1024; i < 30 * 1024 + 512; i++) {
+        assert(pages[i].pp_order == 9);
+        assert(pages[i].pp_ref == 1);
+    }
+    for (int i = 30 * 1024 + 512; i < 31 * 1024; i++) {
+        assert(pages[i].pp_order == 9);
+        assert(pages[i].pp_ref == 0);
+    }
+    free(pp1);
+    assert((free_areas[10].nr_free == 31));
+    assert((free_areas[9].nr_free == 1));
+    for (int i = 31 * 1024; i < 32 * 1024; i++) {
+        assert(pages[i].pp_order == 10);
+        assert(pages[i].pp_ref == 0);
+    }
+    free(pp2);
+    assert((free_areas[10].nr_free == 32));
+    assert((free_areas[9].nr_free == 0));
+    for (int i = 30 * 1024; i < 31 * 1024; i++) {
+        assert(pages[i].pp_order == 10);
+        assert(pages[i].pp_ref == 0);
+    }
+    pp3 = malloc(1);
+    assert(free_areas[10].nr_free == 31);
+    for (int i = 0; i < 10; ++i) {
+        assert(free_areas[i].nr_free == 1);
+    }
+    int o = 0;
+    assert(pages[30 * 1024].pp_order == 0);
+    assert(pages[30 * 1024].pp_ref = 1);
+    while (o < MAX_ORDER) {
+        for (int i = 30 * 1024 + (1 << o); i < 30 * 1024 + (1 << (o + 1)); i++) {
+            assert(pages[i].pp_order == o);
+            assert(pages[i].pp_ref == 0);
+        }
+        ++o;
+    }
+    free(pp3);
+    assert(free_areas[10].nr_free == 32);
+    for (int i = 0; i < 10; ++i) {
+        assert(free_areas[i].nr_free == 0);
+    }
+    for (int i = 30 * 1024; i < 31 * 1024; i++) {
+        assert(pages[i].pp_order == 10);
+        assert(pages[i].pp_ref == 0);
+    }
+    cprintf("check_malloc_and_free() succeeded!\n");
 }
